@@ -21,12 +21,24 @@ def _clean_reason(reason: str, limit: int = 140) -> str:
 
 def chat_text(session: Session, result: dict, level: int) -> str:
     """Short, neutral and name-free: the whole call sees this message."""
-    item = session.current_item().title
-    if level == 1:
-        message = f"⚠️ Off agenda? We're on: {item}."
-        reason = _clean_reason(result.get("reason", ""))
-        return f"{message} (Sounds like: {reason})" if reason else message
-    return f"🚨 Still off agenda. Current item: {item}. Time to get back on track."
+    home = session.home_item()
+    target = home.title if home else (result.get("from_topic") or session.current_item().title)
+    kind = result.get("violation")
+    old = _clean_reason(result.get("from_topic", ""))
+    new = _clean_reason(result.get("topic", ""))
+    if level >= 2:
+        return f"🚨 Still off track. Let's get back to: {target}."
+    if kind == "jump":
+        change = f"from '{old}' to '{new}'" if old else f"to '{new}'"
+        return f"⚠️ Sudden topic change {change}. Let's get back to: {target}."
+    if kind == "not_allowed":
+        return f"⚠️ This meeting is set to one topic: {target}. The talk moved to '{new}'."
+    if kind == "too_many":
+        return f"⚠️ That's another topic switch, and only one is allowed. Back to: {target}."
+    # Test alert or anything without a violation kind.
+    message = f"⚠️ Off agenda? We're on: {session.current_item().title}."
+    reason = _clean_reason(result.get("reason", ""))
+    return f"{message} (Sounds like: {reason})" if reason else message
 
 
 @lru_cache(maxsize=1)

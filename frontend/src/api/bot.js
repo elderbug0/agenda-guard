@@ -27,7 +27,8 @@ async function call(method, path, body) {
 }
 
 export const bot = {
-  createSession: (meeting_url, agenda) => call("POST", "/sessions", { meeting_url, agenda }),
+  createSession: (meeting_url, agenda, mode = "medium", start_index = 0) =>
+    call("POST", "/sessions", { meeting_url, agenda, mode, start_index }),
   start: (id) => call("POST", `/sessions/${id}/start`),
   get: (id) => call("GET", `/sessions/${id}`),
   transcript: (id, last = 30) => call("GET", `/sessions/${id}/transcript?last=${last}`),

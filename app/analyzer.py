@@ -1,4 +1,4 @@
-"""LLM stream-window classifier with internal statuses and public binary categories."""
+"""LLM stream-window classifier: tracks the meeting topic and how it changes."""
 from __future__ import annotations
 
 import json
@@ -10,46 +10,53 @@ from app.models import Session
 
 log = logging.getLogger("agenda_guard.analyzer")
 
-VALID_STATUSES = {"on_track", "moved_on", "off_track"}
+RELATIONS = ["same", "connected", "unrelated"]
 
 RESULT_SCHEMA = {
-    "name": "agenda_check",
+    "name": "topic_check",
     "strict": True,
     "schema": {
         "type": "object",
         "properties": {
-            "status": {"type": "string", "enum": sorted(VALID_STATUSES)},
+            "topic": {"type": "string"},
+            "relation": {"type": "string", "enum": RELATIONS},
+            "on_home_topic": {"type": "boolean"},
             "matched_item_id": {"type": ["string", "null"]},
             "confidence": {"type": "number"},
             "reason": {"type": "string"},
         },
-        "required": ["status", "matched_item_id", "confidence", "reason"],
+        "required": ["topic", "relation", "on_home_topic", "matched_item_id", "confidence", "reason"],
         "additionalProperties": False,
     },
 }
 
-PROMPT = """You monitor a meeting against its agenda.
+PROMPT = """You monitor a meeting and track how its topic changes.
 
-Agenda:
+Home topic (where the meeting started): {home}
+
+Agenda items (for context):
 {agenda}
 
-Current item: {current_item}
+Previous topic (what the group was discussing before): {previous}
 
 You get two pieces of transcript: the recent window, and the most recent ~6 seconds.
-Decide what the group is talking about NOW, focusing mostly on the most recent ~6 seconds.
-- on_track: the discussion is relevant to the current item
-- moved_on: it clearly belongs to a different agenda item (return its id)
-- off_track: it is unrelated to every agenda item
+Judge what the group is talking about NOW, focusing mostly on the most recent ~6 seconds.
+
+Return:
+- topic: a short label (at most 6 words, never a person's name) for what is being discussed now.
+- relation: how the current discussion relates to the PREVIOUS topic:
+  - same: still the previous topic. This includes details, examples, sub-points, questions about it, greetings, filler words and unfinished sentences.
+  - connected: a different topic that follows logically from the previous one, a natural next step or a closely related subject where a listener can see the link.
+  - unrelated: an abrupt jump to a subject with no logical link to the previous topic.
+- on_home_topic: true if the current discussion is about the home topic (always false when there is no home topic).
+- matched_item_id: the id of the agenda item the discussion belongs to, or null.
+- confidence: a number from 0 to 1 for how sure you are about the relation.
+- reason: one short sentence describing what the discussion is about. It is shown to the whole call, so never include a person's name.
 
 Rules:
-- Answer off_track only when the most recent speech is clearly about a subject unrelated to the agenda (for example food, drinks, sports, weather, personal life).
-- Greetings, introductions like "hello everyone" or "I am going to talk about...", filler words and unfinished sentences are on_track.
-- If the recent speech mixes the agenda topic with something else, answer on_track.
+- If you are unsure between same and connected, answer same. If you are unsure between connected and unrelated, answer connected.
+- If the previous topic is "none yet", answer same.
 - Judge by topic, never by who is speaking.
-- If you truly cannot tell, answer on_track.
-- matched_item_id: the id of the agenda item the discussion belongs to (the current item's id for on_track), or null for off_track.
-- confidence: a number from 0 to 1 for how sure you are about the status.
-- reason: one short sentence describing what the discussion is about. It is shown to the whole call, so never include a person's name.
 Return JSON only."""
 
 _client: Any = None
@@ -76,38 +83,49 @@ async def close_client() -> None:
 
 def build_prompt(session: Session) -> str:
     agenda = "\n".join(
-        f"- [{i.id}] {i.title}"
-        + (f": {i.description}" if i.description else "")
-        + (f" ({i.minutes} min)" if i.minutes else "")
+        f"- [{i.id}] {i.title}" + (f": {i.description}" if i.description else "")
         for i in session.agenda
     )
-    current = session.current_item()
-    return PROMPT.format(agenda=agenda, current_item=f"[{current.id}] {current.title}")
+    home = session.home_item()
+    if home is None:
+        home_text = "none (open discussion, there is no fixed starting topic)"
+    else:
+        home_text = home.title + (f": {home.description}" if home.description else "")
+    previous = session.topic or "none yet (the meeting has only just started)"
+    return PROMPT.format(home=home_text, agenda=agenda, previous=previous)
 
 
 def normalize(raw: dict, session: Session) -> dict:
     """Make the model output safe for the drift engine."""
-    status = raw.get("status")
-    if status not in VALID_STATUSES:
-        status = "on_track"
+    relation = raw.get("relation")
+    if relation not in RELATIONS or not session.topic:
+        relation = "same"  # with no previous topic there is nothing to compare with
     try:
         confidence = float(raw.get("confidence", 0.0))
     except (TypeError, ValueError):
         confidence = 0.0
     confidence = max(0.0, min(1.0, confidence))
 
+    on_home = bool(raw.get("on_home_topic")) and session.home_item() is not None
     matched = raw.get("matched_item_id")
     if matched is not None and session.item_by_id(str(matched)) is None:
         matched = None
-    if status == "moved_on" and matched is None:
-        status = "on_track"  # moved_on needs a real agenda item
-
+    topic = " ".join(str(raw.get("topic", "")).split())[:60]
     reason = " ".join(str(raw.get("reason", "")).split())[:200]
+
+    # Display status for the timeline. drift.py may change it when it applies the mode rules.
+    if on_home or relation == "same":
+        status = "on_track"
+    elif relation == "unrelated":
+        status = "off_track"
+    else:
+        status = "moved_on"
     return {
         "status": status,
-        # A recognized move to another agenda item remains useful internally,
-        # but it is on-topic for the user-facing binary stream classification.
         "category": "off_topic" if status == "off_track" else "on_topic",
+        "relation": relation,
+        "topic": topic,
+        "on_home_topic": on_home,
         "matched_item_id": str(matched) if matched is not None else None,
         "confidence": confidence,
         "reason": reason,
@@ -115,10 +133,10 @@ def normalize(raw: dict, session: Session) -> dict:
 
 
 async def analyze(session: Session, text: str | None = None, now: float | None = None) -> dict:
-    """Classify the latest transcript window against the agenda."""
+    """Classify the latest transcript window against the current topic."""
     if text is None:
         text = session.text_of_last(settings.WINDOW_S, now)
-    # The newest ~10 seconds, so a fresh topic change is not diluted by older sentences.
+    # The newest few seconds, so a fresh topic change is not diluted by older sentences.
     recent = session.text_of_last(6, now, settings.STABLE_WORD_DELAY_S) or text
     user_text = f"Recent window:\n{text}\n\nMost recent 6 seconds:\n{recent}"
     resp = await _get_client().chat.completions.create(
@@ -133,6 +151,6 @@ async def analyze(session: Session, text: str | None = None, now: float | None =
     try:
         raw = json.loads(resp.choices[0].message.content)
     except (TypeError, ValueError):
-        log.warning("Analyzer returned unparseable output; treating the window as on_track")
-        raw = {"status": "on_track", "confidence": 0.0, "reason": "unparseable analyzer output"}
+        log.warning("Analyzer returned unparseable output; treating the window as the same topic")
+        raw = {"relation": "same", "confidence": 0.0, "reason": "unparseable analyzer output"}
     return normalize(raw, session)

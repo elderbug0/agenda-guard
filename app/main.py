@@ -1,6 +1,6 @@
 """FastAPI app and routes.
 
-POST /sessions                    create a session (Meet URL + agenda)
+POST /sessions                    create a session (Meet URL + agenda + mode)
 GET  /sessions/{id}               live status
 POST /sessions/{id}/start         send the bot into the meeting
 POST /sessions/{id}/test-alert    fire a test alert (use it to check the sound, Phase 0)
@@ -17,6 +17,7 @@ from fastapi import FastAPI, HTTPException
 
 from app.analyzer import close_client
 from app.config import settings
+from app.drift import ALLOWED_SWITCHES
 from app.loop import end_session, shutdown_all, start_loop
 from app.models import AgendaItem, Session, SessionCreate
 from app.reactor import react
@@ -66,6 +67,10 @@ def _summary(session: Session) -> dict:
         "current_item": {"id": current.id, "title": current.title},
         "off_track_streak": session.off_track_streak,
         "alert_count": session.alert_count,
+        "mode": session.mode,
+        "topic": session.topic,
+        "switches": session.switches,
+        "switches_allowed": ALLOWED_SWITCHES[session.mode],
         "analysis_enabled": settings.ANALYSIS_ENABLED,
         "transcript_segments": len(session.transcript),
         "recent_events": [e.model_dump() for e in session.events[-20:]],
@@ -89,7 +94,34 @@ async def create_session(body: SessionCreate) -> dict:
         agenda.append(
             AgendaItem(id=item_id, title=item.title, description=item.description, minutes=item.minutes)
         )
-    return _summary(store.create(body.meeting_url, agenda))
+
+    if body.mode == "high" and len(agenda) != 1:
+        raise HTTPException(status_code=422, detail="High mode needs exactly one topic.")
+    if not agenda:
+        if body.mode != "easy":
+            raise HTTPException(
+                status_code=422,
+                detail="Add a starting topic (only Easy mode can start without one).",
+            )
+        agenda = [
+            AgendaItem(
+                id="open",
+                title="Open discussion",
+                description="No fixed topic. Any subject is fine as long as the talk flows naturally from one subject to the next.",
+            )
+        ]
+        home_id = None
+    else:
+        if body.start_index >= len(agenda):
+            raise HTTPException(status_code=422, detail="start_index is outside the agenda.")
+        home_id = agenda[body.start_index].id
+
+    session = store.create(body.meeting_url, agenda)
+    session.mode = body.mode
+    session.home_item_id = home_id
+    session.current_item_id = home_id or agenda[0].id
+    session.topic = session.home_title()
+    return _summary(session)
 
 
 @app.get("/sessions/{session_id}")
@@ -102,10 +134,12 @@ async def get_transcript(session_id: str, last: int = 50) -> dict:
     """The most recent transcript segments (the last ~10 minutes are kept in memory)."""
     session = _get(session_id)
     segments = session.transcript[-max(1, last):]
+    live = session.partial_words
     return {
-        "status": session.status,
-        "count": len(segments),
-        "segments": [s.model_dump() for s in segments],
+         "status": session.status,
+         "count": len(segments),
+         "segments": [s.model_dump() for s in segments],
+         "partial": {"speaker": live[0].speaker, "text": " ".join(w.text for w in live)} if live else None,
     }
 
 
