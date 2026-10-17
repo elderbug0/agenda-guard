@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { bot } from "../api/bot.js";
 import { usePoll } from "../usePoll.js";
 import { clock, kind, kindLabel, pct } from "../format.js";
@@ -6,6 +6,8 @@ import { clock, kind, kindLabel, pct } from "../format.js";
 export default function Live({ sessionId, onEnded }) {
   const [s, setS] = useState(null);
   const [segments, setSegments] = useState([]);
+  const [partial, setPartial] = useState(null); // the sentence being spoken right now
+  const listRef = useRef(null);
   const [error, setError] = useState("");
   const [showText, setShowText] = useState(true);
   const [busy, setBusy] = useState("");
@@ -16,12 +18,19 @@ export default function Live({ sessionId, onEnded }) {
       const [session, tr] = await Promise.all([bot.get(sessionId), bot.transcript(sessionId, 12)]);
       setS(session);
       setSegments(tr.segments);
+      setPartial(tr.partial);
       setError("");
       if (session.status === "ended") onEnded();
     } catch (e) {
       setError(e.message);
     }
-  }, 2000);
+  }, 1000);
+
+  // Keep the newest line (including the live one) in view.
+  useEffect(() => {
+    const el = listRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [segments, partial]);
 
   async function testAlert() {
     setBusy("test");
@@ -156,10 +165,10 @@ export default function Live({ sessionId, onEnded }) {
           </button>
         </div>
         {showText &&
-          (segments.length === 0 ? (
+          (segments.length === 0 && !partial ? (
             <p className="muted small">No speech heard yet.</p>
           ) : (
-            <ul className="transcript">
+            <ul className="transcript" ref={listRef}>
               {segments.map((g, i) => (
                 <li key={`${g.ts}-${i}`}>
                   <span className="muted small mono">{clock(g.ts)}</span>
@@ -168,6 +177,14 @@ export default function Live({ sessionId, onEnded }) {
                   </span>
                 </li>
               ))}
+              {partial && (
+                <li className="live-line">
+                  <span className="muted small mono">…</span>
+                  <span>
+                    <b>{partial.speaker}</b> {partial.text}
+                  </span>
+                </li>
+              )}
             </ul>
           ))}
       </section>

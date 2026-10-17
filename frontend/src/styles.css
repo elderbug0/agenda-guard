@@ -226,3 +226,12 @@ input[aria-invalid="true"] { border-color: var(--off); }
 .tiles dt { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
 .tiles dd { font-family: var(--serif); font-size: 30px; font-weight: 500; margin-top: 2px; }
 @media (max-width: 760px) { .tiles { grid-template-columns: repeat(2, 1fr); } }
+select {
+  width: 100%; background: var(--bg); border: 1px solid var(--line); border-radius: 9px;
+  padding: 9px 11px; font: inherit; color: inherit;
+}
+input[type="radio"], input[type="checkbox"] { width: auto; padding: 0; accent-color: var(--ink); }
+.pick { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); cursor: pointer; }
+.pick.on { color: var(--ink); font-weight: 600; }
+.mode-text { margin-top: 8px; color: var(--muted); font-size: 14px; max-width: 64ch; }
+.transcript .live-line { opacity: .65; font-style: italic; }

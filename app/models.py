@@ -69,7 +69,12 @@ class Session(BaseModel):
     off_track_streak: int = 0
     alert_count: int = 0
     last_alert_ts: float = 0.0
-    ignore_windows: int = 0  # windows to skip after a moved_on switch
+    ignore_windows: int = 0  # windows to skip after a topic change
+    mode: Literal["easy", "medium", "high"] = "medium"
+    home_item_id: str | None = None  # the starting topic (an agenda item), if there is one
+    topic: str = ""  # short label of what the group is discussing now
+    switches: int = 0  # switches to a connected topic so far
+    switch_streak: int = 0  # consecutive windows that left the previous topic
     events: list[Event] = Field(default_factory=list)
     status: Literal["waiting", "active", "ended"] = "waiting"
     created_ts: float = Field(default_factory=time.time)
@@ -83,6 +88,13 @@ class Session(BaseModel):
 
     def current_item(self) -> AgendaItem:
         return self.item_by_id(self.current_item_id) or self.agenda[0]
+
+    def home_item(self) -> AgendaItem | None:
+        return self.item_by_id(self.home_item_id)
+
+    def home_title(self) -> str:
+        home = self.home_item()
+        return home.title if home else ""
 
     def add_segment(self, speaker: str, text: str, ts: float | None = None) -> None:
         ts = time.time() if ts is None else ts
@@ -160,4 +172,6 @@ class AgendaItemIn(BaseModel):
 
 class SessionCreate(BaseModel):
     meeting_url: str = Field(min_length=1)
-    agenda: list[AgendaItemIn] = Field(min_length=1)
+    agenda: list[AgendaItemIn] = Field(default_factory=list)  # may be empty in easy mode
+    mode: Literal["easy", "medium", "high"] = "medium"
+    start_index: int = Field(default=0, ge=0)  # which agenda item is the starting topic

@@ -35,8 +35,8 @@ async def tick(session: Session, now: float | None = None) -> int | None:
 
     result = await analyze(session, text)
     log.info(
-        "Analyzer: status=%s confidence=%.2f reason=%s",
-        result["status"], result["confidence"], result["reason"],
+        "Analyzer: relation=%s topic=%r on_home=%s reason=%s",
+        result["relation"], result["topic"], result["on_home_topic"], result["reason"],
     )
     if has_words:
         session.last_analyzed_word_version = session.word_version
@@ -55,7 +55,10 @@ async def tick(session: Session, now: float | None = None) -> int | None:
     )
     if level:
         outcome = await react(session, result, level)
-        log.info("Session %s alert level %s sent: %s", session.id, level, outcome)
+        log.info(
+            "Session %s alert level %s (%s) sent: %s",
+            session.id, level, result.get("violation"), outcome,
+        )
     return level
 
 
