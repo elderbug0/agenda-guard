@@ -60,6 +60,7 @@ class Settings:
 
     # --- Public URL Recall.ai calls back (your ngrok URL in development) ---
     WEBHOOK_BASE_URL: str = ""
+    WEBHOOK_LOG_PAYLOADS: bool = False  # opt-in: raw webhook payloads can contain transcript text
 
     # --- Storage / assets ---
     DB_PATH: str = str(BASE_DIR / "agenda_guard.db")
@@ -95,6 +96,7 @@ class Settings:
             OPENAI_API_KEY=_str("OPENAI_API_KEY", d.OPENAI_API_KEY),
             ANALYZER_MODEL=_str("ANALYZER_MODEL", d.ANALYZER_MODEL),
             WEBHOOK_BASE_URL=_str("WEBHOOK_BASE_URL", d.WEBHOOK_BASE_URL),
+            WEBHOOK_LOG_PAYLOADS=_bool("WEBHOOK_LOG_PAYLOADS", d.WEBHOOK_LOG_PAYLOADS),
             DB_PATH=_str("DB_PATH", d.DB_PATH),
             ALERT_SOUND_PATH=_str("ALERT_SOUND_PATH", d.ALERT_SOUND_PATH),
             ANALYSIS_ENABLED=_bool("ANALYSIS_ENABLED", d.ANALYSIS_ENABLED),

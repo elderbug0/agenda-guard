@@ -142,17 +142,41 @@ def handle_event(payload: dict, now: float | None = None) -> str:
     return "ignored: unhandled event"
 
 
+def _webhook_metadata(payload: dict) -> tuple[str, str | None, int]:
+    """Return safe, compact webhook details for the server log."""
+    event = str(payload.get("event", ""))
+    data = payload.get("data") or {}
+    bot_id = (data.get("bot") or {}).get("id")
+    inner = data.get("data") or {}
+    words = inner.get("words") or []
+    return event, str(bot_id) if bot_id else None, len(words) if isinstance(words, list) else 0
+
+
 @router.post("/webhooks/recall")
 async def recall_webhook(request: Request) -> dict:
     body = await request.body()
     if settings.RECALL_WORKSPACE_SECRET and not verify_signature(
         request.headers, body, settings.RECALL_WORKSPACE_SECRET
     ):
+        log.warning("Recall webhook rejected: invalid signature (%d bytes)", len(body))
         raise HTTPException(status_code=401, detail="Invalid webhook signature")
     try:
         payload = json.loads(body)
     except ValueError:
+        log.warning("Recall webhook rejected: invalid JSON (%d bytes)", len(body))
         raise HTTPException(status_code=400, detail="Body is not valid JSON")
+    if not isinstance(payload, dict):
+        log.warning("Recall webhook rejected: JSON root is not an object")
+        raise HTTPException(status_code=400, detail="Body must be a JSON object")
+    event, bot_id, word_count = _webhook_metadata(payload)
+    log.info(
+        "Recall webhook received event=%s bot_id=%s words=%d",
+        event or "<missing>",
+        bot_id or "<missing>",
+        word_count,
+    )
+    if settings.WEBHOOK_LOG_PAYLOADS:
+        log.info("Recall webhook payload: %s", json.dumps(payload, ensure_ascii=False))
     outcome = handle_event(payload)
-    log.debug("Webhook %s -> %s", payload.get("event"), outcome)
+    log.info("Recall webhook processed event=%s outcome=%s", event or "<missing>", outcome)
     return {"ok": True, "outcome": outcome}

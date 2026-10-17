@@ -124,6 +124,7 @@ All settings are environment variables and can be placed in `.env`.
 | `RECALL_API_KEY` | Recall.ai API key | required |
 | `RECALL_REGION` | Recall.ai API region | `us-east-1` |
 | `WEBHOOK_BASE_URL` | Public base URL for Recall callbacks | required |
+| `WEBHOOK_LOG_PAYLOADS` | Log raw webhook bodies; contains transcript text | `false` |
 | `RECALL_WORKSPACE_SECRET` | Optional webhook signature secret | empty |
 | `OPENAI_API_KEY` | OpenAI key used for classification | required when analysis is enabled |
 | `ANALYSIS_ENABLED` | Set `false` for transcript-only testing | `true` |
@@ -148,6 +149,16 @@ https://YOUR-PUBLIC-URL/webhooks/recall
 To have the app close sessions automatically, also configure `bot.in_call_recording`, `bot.call_ended`, `bot.done`, and `bot.fatal` in the Recall.ai dashboard to use the same URL. Without those status events, end meetings through `POST /sessions/SESSION_ID/end`.
 
 Set `RECALL_WORKSPACE_SECRET` when Recall provides a workspace webhook signing secret. The receiver rejects unsigned or invalidly signed requests with HTTP 401 when this setting is present.
+
+## View webhook delivery in the console
+
+Run Uvicorn in the foreground. Every webhook produces two safe metadata lines: receipt (`event`, `bot_id`, and word count) and processing outcome.
+
+```bash
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+For temporary raw-payload debugging, set `WEBHOOK_LOG_PAYLOADS=true` in `.env` and restart Uvicorn. This prints transcript text to the terminal, so turn it off again after diagnosing delivery.
 
 ## Troubleshooting
 
