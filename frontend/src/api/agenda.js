@@ -1,33 +1,35 @@
-// STEP 1 (agenda maker) plugs in here.
+// Agenda import.
 //
-// Right now this returns a hard-coded mock agenda. Later, replace the body of
-// `fetchAgenda` with a call to your agenda generator, for example:
-//
-//   const res = await fetch("/agenda-maker/generate", { method: "POST", body: JSON.stringify({ source: "jira" }) });
-//   return res.json();   // must return the same shape as MOCK_AGENDA below
-//
-// Shape of one item: { title: string, description?: string, minutes?: number }
+// The agenda generator exports a JSON file like agenda_full.json:
+//   { meeting_title, meeting_goal, items: [{ title, description, duration_min, ... }], ... }
+// `parseAgenda` turns that text into the shape the bot API expects:
+//   { title, goal, items: [{ title, description, minutes }] }
+// Extra fields (owner, rationale, expected_outcome, ...) are ignored. A bare array of items also works.
 
-export const MOCK_AGENDA = [
-  {
-    title: "Sprint review",
-    description: "What shipped this sprint: features, bug fixes, demos of finished tickets",
-    minutes: 10,
-  },
-  {
-    title: "Blockers and risks",
-    description: "Technical blockers, dependencies on other teams, deadline risks",
-    minutes: 8,
-  },
-  {
-    title: "Next sprint planning",
-    description: "Priorities, ticket estimates, who takes what for the next sprint",
-    minutes: 12,
-  },
-];
-
-export async function fetchAgenda() {
-  // Pretend to be a network call so the UI already handles a loading state.
-  await new Promise((r) => setTimeout(r, 350));
-  return MOCK_AGENDA.map((item) => ({ ...item }));
+export function parseAgenda(text) {
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error("That file is not valid JSON.");
+  }
+  const list = Array.isArray(data) ? data : data && data.items;
+  if (!Array.isArray(list)) {
+    throw new Error('No agenda found. Expected an "items" list.');
+  }
+  const items = list
+    .map((it) => ({
+      title: String((it && it.title) || "").trim(),
+      description: String((it && it.description) || "").trim(),
+      minutes: Math.max(0, Math.round(Number(it && (it.duration_min ?? it.minutes)) || 0)),
+    }))
+    .filter((it) => it.title);
+  if (items.length === 0) {
+    throw new Error("The file has no agenda items with a title.");
+  }
+  return {
+    title: String((!Array.isArray(data) && data.meeting_title) || "").trim(),
+    goal: String((!Array.isArray(data) && data.meeting_goal) || "").trim(),
+    items,
+  };
 }

@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useRef, useState } from "react";
 import { bot } from "../api/bot.js";
-import { fetchAgenda } from "../api/agenda.js";
+import { parseAgenda } from "../api/agenda.js";
 
 const MEET_RE = /^https:\/\/meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}(\?.*)?$/i;
 
@@ -20,20 +20,31 @@ const MODES = {
 };
 
 export default function Setup({ onStarted }) {
-  const [agenda, setAgenda] = useState(null);
+  const [agenda, setAgenda] = useState([]);
+  const [meta, setMeta] = useState(null); // meeting title + goal from the imported file
+  const fileRef = useRef(null);
   const [url, setUrl] = useState("");
   const [mode, setMode] = useState("medium");
   const [noStart, setNoStart] = useState(false);
   const [start, setStart] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [importError, setImportError] = useState("");
 
-  const loadAgenda = () => {
-    setAgenda(null);
-    setStart(0);
-    fetchAgenda().then(setAgenda);
-  };
-  useEffect(loadAgenda, []);
+  async function importAgenda(e) {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = ""; // lets the same file be picked again
+    if (!file) return;
+    setImportError("");
+    try {
+      const parsed = parseAgenda(await file.text());
+      setAgenda(parsed.items);
+      setMeta(parsed.title || parsed.goal ? { title: parsed.title, goal: parsed.goal } : null);
+      setStart(0);
+    } catch (err) {
+      setImportError(`Import failed: ${err.message}`);
+    }
+  }
 
   const edit = (i, patch) => setAgenda((a) => a.map((it, j) => (j === i ? { ...it, ...patch } : it)));
   const remove = (i) => {
@@ -43,11 +54,11 @@ export default function Setup({ onStarted }) {
   const add = () => setAgenda((a) => [...a, { title: "", description: "", minutes: 0 }]);
 
   const skipTopic = mode === "easy" && noStart;
-  const cleaned = (agenda || []).filter((it) => it.title.trim());
-  const chosen = agenda ? agenda[start] : null;
+  const cleaned = agenda.filter((it) => it.title.trim());
+  const chosen = agenda[start] || null;
   const startItem = chosen && chosen.title.trim() ? chosen : cleaned[0];
   const urlOk = MEET_RE.test(url.trim());
-  const canStart = urlOk && !busy && (skipTopic || (agenda !== null && cleaned.length > 0));
+  const canStart = urlOk && !busy && (skipTopic || cleaned.length > 0);
 
   async function startMeeting() {
     setBusy(true);
@@ -125,13 +136,30 @@ export default function Setup({ onStarted }) {
                 {mode === "high" && " Only the selected item is used."}
               </p>
             </div>
-            <button className="btn ghost" onClick={loadAgenda} disabled={busy}>
-              Regenerate
+            <button className="btn ghost" onClick={() => fileRef.current.click()} disabled={busy}>
+              Import agenda
             </button>
+            <input ref={fileRef} type="file" accept=".json,application/json" hidden onChange={importAgenda} />
           </div>
 
-          {agenda === null ? (
-            <p className="muted">Generating agenda…</p>
+          {importError && (
+            <p className="banner bad" role="alert" style={{ marginTop: 12 }}>
+              {importError}
+            </p>
+          )}
+
+          {meta && (
+            <p className="mode-text">
+              {meta.title && <strong>{meta.title}</strong>}
+              {meta.title && meta.goal && " · "}
+              {meta.goal}
+            </p>
+          )}
+
+          {agenda.length === 0 ? (
+            <p className="muted small" style={{ marginTop: 14 }}>
+              No topics yet. Import an agenda file (.json) or add an item by hand.
+            </p>
           ) : (
             <ol className="items">
               {agenda.map((it, i) => (
@@ -174,11 +202,9 @@ export default function Setup({ onStarted }) {
               ))}
             </ol>
           )}
-          {agenda && (
-            <button className="btn ghost add" onClick={add}>
-              + Add item
-            </button>
-          )}
+          <button className="btn ghost add" onClick={add}>
+            + Add item
+          </button>
         </section>
       )}
 
