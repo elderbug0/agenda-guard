@@ -68,17 +68,19 @@ class Settings:
     # --- Analysis loop ---
     # False = transcript-only mode: no OpenAI calls, no alerts, just the live transcript.
     ANALYSIS_ENABLED: bool = True
-    ANALYSIS_INTERVAL_S: float = 20.0  # how often each active session is analyzed
-    WINDOW_S: int = 90  # how much recent transcript the analyzer sees
+    ANALYSIS_INTERVAL_S: float = 10.0  # how often each active session is analyzed
+    WINDOW_S: int = 30  # recent, timed transcript context sent to the classifier
     MIN_WORDS: int = 15  # skip a window with less speech than this
+    MIN_NEW_WORDS: int = 8  # debounce word-at-a-time webhooks before another decision
+    STABLE_WORD_DELAY_S: float = 1.0  # leave a short tail for late words / partial phrases
     TRANSCRIPT_KEEP_S: int = 600  # keep only the last ~10 minutes in memory
 
     # --- Drift engine ---
-    STREAK_NEEDED: int = 3  # consecutive off-track windows before an alert
+    STREAK_NEEDED: int = 2  # consecutive off-topic windows before an alert
     CONFIDENCE_MIN: float = 0.7  # minimum confidence for an off-track window to count
     MOVED_ON_CONFIDENCE: float = 0.75  # confidence needed to switch the current item
     MOVED_ON_IGNORE_WINDOWS: int = 2  # windows to ignore after switching items
-    COOLDOWN_S: int = 180  # minimum gap between alerts
+    COOLDOWN_S: int = 60  # minimum gap between alerts
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -99,6 +101,8 @@ class Settings:
             ANALYSIS_INTERVAL_S=_float("ANALYSIS_INTERVAL_S", d.ANALYSIS_INTERVAL_S),
             WINDOW_S=_int("WINDOW_S", d.WINDOW_S),
             MIN_WORDS=_int("MIN_WORDS", d.MIN_WORDS),
+            MIN_NEW_WORDS=_int("MIN_NEW_WORDS", d.MIN_NEW_WORDS),
+            STABLE_WORD_DELAY_S=_float("STABLE_WORD_DELAY_S", d.STABLE_WORD_DELAY_S),
             TRANSCRIPT_KEEP_S=_int("TRANSCRIPT_KEEP_S", d.TRANSCRIPT_KEEP_S),
             STREAK_NEEDED=_int("STREAK_NEEDED", d.STREAK_NEEDED),
             CONFIDENCE_MIN=_float("CONFIDENCE_MIN", d.CONFIDENCE_MIN),

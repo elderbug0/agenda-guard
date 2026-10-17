@@ -1,4 +1,4 @@
-"""OpenAI call, prompt builder and JSON result schema (on_track / moved_on / off_track)."""
+"""LLM stream-window classifier with internal statuses and public binary categories."""
 from __future__ import annotations
 
 import json
@@ -35,7 +35,7 @@ Agenda:
 
 Current item: {current_item}
 
-You get the last ~90 seconds of transcript. Decide:
+You get a stable, recent transcript window (about 30 seconds). Decide:
 - on_track: the discussion is relevant to the current item
 - moved_on: it clearly belongs to a different agenda item (return its id)
 - off_track: it is unrelated to every agenda item
@@ -99,6 +99,9 @@ def normalize(raw: dict, session: Session) -> dict:
     reason = " ".join(str(raw.get("reason", "")).split())[:200]
     return {
         "status": status,
+        # A recognized move to another agenda item remains useful internally,
+        # but it is on-topic for the user-facing binary stream classification.
+        "category": "off_topic" if status == "off_track" else "on_topic",
         "matched_item_id": str(matched) if matched is not None else None,
         "confidence": confidence,
         "reason": reason,

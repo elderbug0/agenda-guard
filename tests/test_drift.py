@@ -24,11 +24,10 @@ def moved(item_id: str = "item-2", conf: float = 0.9) -> dict:
     return {"status": "moved_on", "matched_item_id": item_id, "confidence": conf, "reason": "hiring"}
 
 
-def test_alert_after_three_consecutive_off_track_windows():
+def test_alert_after_two_consecutive_off_track_windows():
     s = make_session()
     assert drift.update(s, off(), 1000) is None
-    assert drift.update(s, off(), 1020) is None
-    assert drift.update(s, off(), 1040) == 1
+    assert drift.update(s, off(), 1020) == 1
     assert s.alert_count == 1
     assert s.off_track_streak == 0
 
@@ -58,17 +57,16 @@ def test_confidence_exactly_at_minimum_counts():
 
 def test_cooldown_blocks_second_alert_then_escalates_to_level_two():
     s = make_session()
-    for t in (1000, 1020):
-        drift.update(s, off(), t)
-    assert drift.update(s, off(), 1040) == 1
+    assert drift.update(s, off(), 1000) is None
+    assert drift.update(s, off(), 1020) == 1
 
     # Another streak builds, but the cooldown has not passed yet.
-    for t in (1060, 1080):
+    for t in (1040, 1060):
         assert drift.update(s, off(), t) is None
-    assert drift.update(s, off(), 1100) is None  # streak reached, cooldown still active
+    assert drift.update(s, off(), 1080) is None  # streak reached, cooldown still active
 
     # Once the cooldown is over, the next off-track window fires level 2.
-    assert drift.update(s, off(), 1040 + settings.COOLDOWN_S + 1) == 2
+    assert drift.update(s, off(), 1020 + settings.COOLDOWN_S + 1) == 2
     assert s.alert_count == 2
 
 

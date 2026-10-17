@@ -55,6 +55,24 @@ def test_unknown_bot_and_empty_transcript_are_ignored():
     assert s.transcript == []
 
 
+def test_timed_words_are_ordered_and_retried_webhooks_are_deduplicated():
+    s = fresh_session()
+    payload = transcript_payload(s.bot_id, ["second", "first"])
+    payload["data"]["data"]["words"] = [
+        {"text": "second", "start_timestamp": 2.0, "end_timestamp": 2.4},
+        {"text": "first", "start_timestamp": 1.0, "end_timestamp": 1.3},
+    ]
+
+    assert webhooks.handle_event(payload, now=1000.0) == "segment added"
+    assert [(word.text, word.start_timestamp, word.end_timestamp) for word in s.words] == [
+        ("first", 1.0, 1.3),
+        ("second", 2.0, 2.4),
+    ]
+    assert s.text_of_last(0.49) == "second"
+    assert webhooks.handle_event(payload, now=1001.0) == "ignored: duplicate transcript"
+    assert len(s.words) == 2 and len(s.transcript) == 1
+
+
 def test_status_events_activate_and_end_session_and_save_report():
     s = fresh_session()
     webhooks.handle_event({"event": "bot.in_call_recording", "data": {"bot": {"id": s.bot_id}}})
@@ -92,7 +110,7 @@ def test_signature_verification():
 # ---------- analysis loop ----------
 
 
-def test_three_off_track_ticks_fire_one_alert_and_log_events():
+def test_two_off_track_ticks_fire_one_alert_and_log_events():
     s = fresh_session()
     original_analyze, original_react = loop.analyze, loop.react
     reacted: list[int] = []
@@ -107,15 +125,16 @@ def test_three_off_track_ticks_fire_one_alert_and_log_events():
     loop.analyze, loop.react = fake_analyze, fake_react
     try:
         now = 10_000.0
-        for i in range(3):
+        for i in range(2):
             s.add_segment("Alex", LONG_TEXT, now + i * 20)
             asyncio.run(loop.tick(s, now + i * 20 + 1))
     finally:
         loop.analyze, loop.react = original_analyze, original_react
 
     assert reacted == [1]
-    assert [e.alert_level for e in s.events] == [None, None, 1]
+    assert [e.alert_level for e in s.events] == [None, 1]
     assert s.events[-1].reason == "football"
+    assert s.events[-1].category == "off_topic"
 
 
 def test_tick_skips_windows_with_too_little_speech():

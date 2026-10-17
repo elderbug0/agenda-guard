@@ -29,6 +29,7 @@ def build_report(session: Session) -> dict:
         {
             "time": _iso(e.ts),
             "status": e.status,
+            "category": e.category,
             "item_id": e.item_id,
             "item_title": title(e.item_id),
             "confidence": e.confidence,

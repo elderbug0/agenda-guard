@@ -1,4 +1,4 @@
-"""Per-session analysis timer: every 20 s analyze the last 90 s of transcript."""
+"""Per-session timed-stream classifier and sustained off-topic alarm gate."""
 from __future__ import annotations
 
 import asyncio
@@ -22,16 +22,24 @@ async def tick(session: Session, now: float | None = None) -> int | None:
     """Run one analysis window. Returns the alert level that fired, if any."""
     now = time.time() if now is None else now
     session.prune(now)
-    text = session.text_of_last(settings.WINDOW_S, now)
+    if session.words and session.word_version == session.last_analyzed_word_version:
+        return None  # do not repeatedly score an unchanged media window
+    if session.words and session.pending_word_count < settings.MIN_NEW_WORDS:
+        return None  # wait for enough fresh speech to make a meaningful decision
+    text = session.text_of_last(settings.WINDOW_S, now, settings.STABLE_WORD_DELAY_S)
     if len(text.split()) < settings.MIN_WORDS:
         return None  # silence or near-silence is not a signal either way
 
     result = await analyze(session, text)
+    if session.words:
+        session.last_analyzed_word_version = session.word_version
+        session.pending_word_count = 0
     level = drift.update(session, result, now)
     session.events.append(
         Event(
             ts=now,
             status=result["status"],
+            category=result.get("category", "off_topic" if result["status"] == "off_track" else "on_topic"),
             item_id=result.get("matched_item_id") or session.current_item_id,
             confidence=result["confidence"],
             reason=result["reason"],
