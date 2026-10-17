@@ -22,9 +22,10 @@ async def tick(session: Session, now: float | None = None) -> int | None:
     """Run one analysis window. Returns the alert level that fired, if any."""
     now = time.time() if now is None else now
     session.prune(now)
-    if session.words and session.word_version == session.last_analyzed_word_version:
+    has_words = bool(session.words or session.partial_words)
+    if has_words and session.word_version == session.last_analyzed_word_version:
         return None  # do not repeatedly score an unchanged media window
-    if session.words and session.pending_word_count < settings.MIN_NEW_WORDS:
+    if has_words and session.pending_word_count < settings.MIN_NEW_WORDS:
         return None  # wait for enough fresh speech to make a meaningful decision
     text = session.text_of_last(settings.WINDOW_S, now, settings.STABLE_WORD_DELAY_S)
     n_words = len(text.split())
@@ -37,7 +38,7 @@ async def tick(session: Session, now: float | None = None) -> int | None:
         "Analyzer: status=%s confidence=%.2f reason=%s",
         result["status"], result["confidence"], result["reason"],
     )
-    if session.words:
+    if has_words:
         session.last_analyzed_word_version = session.word_version
         session.pending_word_count = 0
     level = drift.update(session, result, now)

@@ -6,7 +6,6 @@ import hashlib
 import hmac
 import json
 import logging
-from app.keywords import check_keywords
 import math
 import time
 from datetime import datetime
@@ -133,8 +132,20 @@ def handle_event(payload: dict, now: float | None = None) -> str:
             session.status = "active"  # first words heard: the bot is in the call
         session.add_segment(speaker, text, received_ts)
         log.info("[transcript %s] %s: %s", session.id, speaker, text)
-        #check_keywords(session, text, received_ts)  # keyword alarm (for example "police")
+        # check_keywords(session, text, received_ts)  # keyword alarm (for example "police")
         return "segment added"
+
+    if event == "transcript.partial_data":
+        inner = data.get("data") or {}
+        received_ts = time.time() if now is None else now
+        speaker = (inner.get("participant") or {}).get("name") or "Unknown"
+        words = parse_words(inner.get("words") or [], speaker, received_ts)
+        if not words:
+            return "ignored: empty partial"
+        session.set_partial(words)
+        if session.status == "waiting":
+            session.status = "active"
+        return "partial updated"
 
     if event == "bot.in_call_recording":
         if session.status == "waiting":
@@ -175,14 +186,17 @@ async def recall_webhook(request: Request) -> dict:
         log.warning("Recall webhook rejected: JSON root is not an object")
         raise HTTPException(status_code=400, detail="Body must be a JSON object")
     event, bot_id, word_count = _webhook_metadata(payload)
-    log.info(
-        "Recall webhook received event=%s bot_id=%s words=%d",
-        event or "<missing>",
-        bot_id or "<missing>",
-        word_count,
-    )
-    if settings.WEBHOOK_LOG_PAYLOADS:
-        log.info("Recall webhook payload: %s", json.dumps(payload, ensure_ascii=False))
+    is_partial = event == "transcript.partial_data"  # these arrive constantly: keep the log quiet
+    if not is_partial:
+        log.info(
+            "Recall webhook received event=%s bot_id=%s words=%d",
+            event or "<missing>",
+            bot_id or "<missing>",
+            word_count,
+        )
+        if settings.WEBHOOK_LOG_PAYLOADS:
+            log.info("Recall webhook payload: %s", json.dumps(payload, ensure_ascii=False))
     outcome = handle_event(payload)
-    log.info("Recall webhook processed event=%s outcome=%s", event or "<missing>", outcome)
+    if not is_partial:
+        log.info("Recall webhook processed event=%s outcome=%s", event or "<missing>", outcome)
     return {"ok": True, "outcome": outcome}

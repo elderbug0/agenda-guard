@@ -61,6 +61,7 @@ class Session(BaseModel):
     current_item_id: str
     transcript: list[Segment] = Field(default_factory=list)  # only the last ~10 min
     words: list[TranscriptWord] = Field(default_factory=list)  # ordered Recall media timeline
+    partial_words: list[TranscriptWord] = Field(default_factory=list, exclude=True)  # in-progress speech
     word_fingerprints: set[str] = Field(default_factory=set, exclude=True)
     word_version: int = 0
     last_analyzed_word_version: int = 0
@@ -90,6 +91,7 @@ class Session(BaseModel):
 
     def add_words(self, speaker: str, words: list[TranscriptWord], received_ts: float | None = None) -> list[TranscriptWord]:
         """Add new words exactly once, keeping late webhook batches in timeline order."""
+        self.partial_words = []  # a final result replaces any in-progress partial one
         received_ts = time.time() if received_ts is None else received_ts
         added: list[TranscriptWord] = []
         for word in words:
@@ -107,6 +109,13 @@ class Session(BaseModel):
             self.prune(received_ts)
         return added
 
+    def set_partial(self, words: list[TranscriptWord]) -> None:
+        """Replace the in-progress (partial) words with the newest version."""
+        grew = max(0, len(words) - len(self.partial_words))
+        self.partial_words = words
+        self.word_version += 1
+        self.pending_word_count += grew
+
     def prune(self, now: float | None = None) -> None:
         now = time.time() if now is None else now
         cutoff = now - settings.TRANSCRIPT_KEEP_S
@@ -122,14 +131,16 @@ class Session(BaseModel):
         self, seconds: float, now: float | None = None, stable_delay_s: float = 0.0
     ) -> str:
         """Transcript text from the last `seconds`, without speaker names (topic only)."""
-        if self.words:
+        all_words = self.words + self.partial_words  # final words, then the in-progress ones
+        if all_words:
             # Anchor the window to the newest media timestamp so delayed delivery
             # and relative meeting clocks cannot distort its contents.
-            stable_until = self.words[-1].end_timestamp - stable_delay_s
+            newest = max(word.end_timestamp for word in all_words)
+            stable_until = newest - stable_delay_s
             cutoff = stable_until - seconds
             return " ".join(
                 word.text
-                for word in self.words
+                for word in all_words
                 if cutoff <= word.end_timestamp <= stable_until
             )
         now = time.time() if now is None else now

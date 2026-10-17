@@ -77,7 +77,8 @@ class RecallClient:
                     }
                 },
                 "realtime_endpoints": [
-                    {"type": "webhook", "url": webhook_url, "events": ["transcript.data"]}
+                    {"type": "webhook", "url": webhook_url,
+                     "events": ["transcript.data", "transcript.partial_data"]}
                 ],
             },
             "automatic_audio_output": {
