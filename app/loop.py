@@ -27,10 +27,16 @@ async def tick(session: Session, now: float | None = None) -> int | None:
     if session.words and session.pending_word_count < settings.MIN_NEW_WORDS:
         return None  # wait for enough fresh speech to make a meaningful decision
     text = session.text_of_last(settings.WINDOW_S, now, settings.STABLE_WORD_DELAY_S)
-    if len(text.split()) < settings.MIN_WORDS:
+    n_words = len(text.split())
+    if n_words < settings.MIN_WORDS:
+        log.info("Skipped analysis: %d words in the window (need %d)", n_words, settings.MIN_WORDS)
         return None  # silence or near-silence is not a signal either way
 
     result = await analyze(session, text)
+    log.info(
+        "Analyzer: status=%s confidence=%.2f reason=%s",
+        result["status"], result["confidence"], result["reason"],
+    )
     if session.words:
         session.last_analyzed_word_version = session.word_version
         session.pending_word_count = 0

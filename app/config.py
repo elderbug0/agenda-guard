@@ -54,8 +54,9 @@ class Settings:
     TRANSCRIPT_LANGUAGE: str = "en"
     BOT_NAME: str = "Agenda Guard"
 
-    # --- OpenAI ---
+    # --- OpenAI (or an OpenAI-compatible service such as OpenRouter) ---
     OPENAI_API_KEY: str = ""
+    OPENAI_BASE_URL: str = ""  # empty = OpenAI itself; OpenRouter: https://openrouter.ai/api/v1
     ANALYZER_MODEL: str = "gpt-4o-mini"
 
     # --- Public URL Recall.ai calls back (your ngrok URL in development) ---
@@ -94,6 +95,7 @@ class Settings:
             TRANSCRIPT_LANGUAGE=_str("TRANSCRIPT_LANGUAGE", d.TRANSCRIPT_LANGUAGE),
             BOT_NAME=_str("BOT_NAME", d.BOT_NAME),
             OPENAI_API_KEY=_str("OPENAI_API_KEY", d.OPENAI_API_KEY),
+            OPENAI_BASE_URL=_str("OPENAI_BASE_URL", d.OPENAI_BASE_URL),
             ANALYZER_MODEL=_str("ANALYZER_MODEL", d.ANALYZER_MODEL),
             WEBHOOK_BASE_URL=_str("WEBHOOK_BASE_URL", d.WEBHOOK_BASE_URL),
             WEBHOOK_LOG_PAYLOADS=_bool("WEBHOOK_LOG_PAYLOADS", d.WEBHOOK_LOG_PAYLOADS),

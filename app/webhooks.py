@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import json
 import logging
+from app.keywords import check_keywords
 import math
 import time
 from datetime import datetime
@@ -13,6 +14,7 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException, Request
 
 from app.config import settings
+
 from app.loop import end_session
 from app.models import TranscriptWord
 from app.sessions import store
@@ -52,7 +54,10 @@ def words_to_text(words: list) -> str:
 
 
 def _timestamp(value: object) -> float | None:
-    """Accept Recall numeric timestamps and RFC 3339 timestamps."""
+    """Accept Recall timestamps: a number, an RFC 3339 string, or {"relative": s, "absolute": iso}."""
+    if isinstance(value, dict):
+        relative = value.get("relative")
+        value = relative if relative is not None else value.get("absolute")
     if isinstance(value, (int, float)):
         parsed = float(value)
     elif isinstance(value, str):
@@ -128,6 +133,7 @@ def handle_event(payload: dict, now: float | None = None) -> str:
             session.status = "active"  # first words heard: the bot is in the call
         session.add_segment(speaker, text, received_ts)
         log.info("[transcript %s] %s: %s", session.id, speaker, text)
+        #check_keywords(session, text, received_ts)  # keyword alarm (for example "police")
         return "segment added"
 
     if event == "bot.in_call_recording":

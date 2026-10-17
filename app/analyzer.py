@@ -35,15 +35,20 @@ Agenda:
 
 Current item: {current_item}
 
-You get a stable, recent transcript window (about 30 seconds). Decide:
+You get two pieces of transcript: the recent window, and the most recent ~10 seconds.
+Decide what the group is talking about NOW. The most recent part matters most: if it is
+unrelated to the agenda, answer off_track even when earlier sentences were on topic.
 - on_track: the discussion is relevant to the current item
 - moved_on: it clearly belongs to a different agenda item (return its id)
 - off_track: it is unrelated to every agenda item
 
 Rules:
-- Short tangents (under ~30 s), small talk and greetings are normal. Do not flag them.
+- Ongoing talk that is unrelated to the agenda is off_track, even when it is casual
+  (food, drinks, weather, personal stories). Do not excuse it as small talk or a short tangent:
+  tolerance for tangents is handled elsewhere.
+- A plain greeting or goodbye at the start or end is fine.
 - Judge by topic, never by who is speaking.
-- If unsure, answer on_track.
+- This is a strict demo. If the most recent 10 seconds are not clearly about the agenda topic, answer off_track. Only answer on_track when the talk is about the agenda topic.
 - matched_item_id: the id of the agenda item the discussion belongs to (the current item's id for on_track), or null for off_track.
 - confidence: a number from 0 to 1 for how sure you are about the status.
 - reason: one short sentence describing what the discussion is about. It is shown to the whole call, so never include a person's name.
@@ -57,7 +62,10 @@ def _get_client():
     if _client is None:
         from openai import AsyncOpenAI  # imported lazily so the app can start without a key
 
-        _client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        _client = AsyncOpenAI(
+            api_key=settings.OPENAI_API_KEY,
+            base_url=settings.OPENAI_BASE_URL or None,
+        )
     return _client
 
 
@@ -112,13 +120,16 @@ async def analyze(session: Session, text: str | None = None, now: float | None =
     """Classify the latest transcript window against the agenda."""
     if text is None:
         text = session.text_of_last(settings.WINDOW_S, now)
+    # The newest ~10 seconds, so a fresh topic change is not diluted by older sentences.
+    recent = session.text_of_last(10, now, settings.STABLE_WORD_DELAY_S) or text
+    user_text = f"Recent window:\n{text}\n\nMost recent 10 seconds:\n{recent}"
     resp = await _get_client().chat.completions.create(
         model=settings.ANALYZER_MODEL,
         temperature=0,
         response_format={"type": "json_schema", "json_schema": RESULT_SCHEMA},
         messages=[
             {"role": "system", "content": build_prompt(session)},
-            {"role": "user", "content": text},
+            {"role": "user", "content": user_text},
         ],
     )
     try:
