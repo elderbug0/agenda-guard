@@ -4,6 +4,13 @@ import { parseAgenda } from "../api/agenda.js";
 
 const MEET_RE = /^https:\/\/meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}(\?.*)?$/i;
 
+// UI mock only: these sounds are not real yet and the choice is not sent to the bot.
+const SOUNDS = [
+  { id: "default", label: "Default alert" },
+  { id: "chime", label: "Soft chime" },
+  { id: "buzzer", label: "Buzzer" },
+];
+
 const MODES = {
   easy: {
     label: "Easy",
@@ -30,6 +37,7 @@ export default function Setup({ onStarted }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [importError, setImportError] = useState("");
+  const [sound, setSound] = useState(SOUNDS[0].id);
 
   async function importAgenda(e) {
     const file = e.target.files && e.target.files[0];
@@ -207,6 +215,20 @@ export default function Setup({ onStarted }) {
           </button>
         </section>
       )}
+
+      <section className="card">
+        <h2>Alert sound</h2>
+        <label className="field">
+          <span>Sound played in the meeting when an alert fires</span>
+          <select value={sound} onChange={(e) => setSound(e.target.value)} aria-label="Alert sound">
+            {SOUNDS.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      </section>
 
       <section className="card">
         <h2>Meeting</h2>

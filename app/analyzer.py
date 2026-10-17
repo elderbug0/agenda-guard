@@ -53,8 +53,15 @@ Return:
 - confidence: a number from 0 to 1 for how sure you are about the relation.
 - reason: one short sentence describing what the discussion is about. It is shown to the whole call, so never include a person's name.
 
+How to decide:
+- Look at the most recent ~6 seconds. If they are clearly about a completely different subject than the previous topic AND than every agenda item, answer unrelated with confidence 0.9 or higher. Examples of such jumps: sports, food and restaurants, movies, weekend or holiday plans, jokes, gossip, personal errands, or any other subject a meeting about the agenda would never cover.
+- A clear jump is unrelated even if the older part of the recent window is still about the previous topic. The window is mixed because the topic just changed, so trust the newest seconds.
+- Do not wait for the group to finish the old topic or to make several statements. One or two full sentences about the new subject are enough.
+
 Rules:
-- If you are unsure between same and connected, answer same. If you are unsure between connected and unrelated, answer connected.
+- Answer same for details, examples, sub-points, questions about the previous topic, greetings, small talk of a few words, filler words and unfinished sentences. Never call a single stray word or a short aside unrelated.
+- Answer connected only when a listener can see a real logical link to the previous topic or to another agenda item. If you are unsure between same and connected, answer same.
+- If you are unsure between connected and unrelated, answer connected, but only when you truly see a possible link. A topic with no link at all is unrelated.
 - If the previous topic is "none yet", answer same.
 - Judge by topic, never by who is speaking.
 Return JSON only."""
