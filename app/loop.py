@@ -1,0 +1,95 @@
+"""Per-session analysis timer: every 20 s analyze the last 90 s of transcript."""
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+
+from app import drift
+from app.analyzer import analyze
+from app.config import settings
+from app.models import Event, Session
+from app.reactor import react
+from app.report import build_report, save_report
+from app.sessions import store
+
+log = logging.getLogger("agenda_guard.loop")
+
+_tasks: dict[str, asyncio.Task] = {}
+
+
+async def tick(session: Session, now: float | None = None) -> int | None:
+    """Run one analysis window. Returns the alert level that fired, if any."""
+    now = time.time() if now is None else now
+    session.prune(now)
+    text = session.text_of_last(settings.WINDOW_S, now)
+    if len(text.split()) < settings.MIN_WORDS:
+        return None  # silence or near-silence is not a signal either way
+
+    result = await analyze(session, text)
+    level = drift.update(session, result, now)
+    session.events.append(
+        Event(
+            ts=now,
+            status=result["status"],
+            item_id=result.get("matched_item_id") or session.current_item_id,
+            confidence=result["confidence"],
+            reason=result["reason"],
+            alert_level=level,
+        )
+    )
+    if level:
+        outcome = await react(session, result, level)
+        log.info("Session %s alert level %s sent: %s", session.id, level, outcome)
+    return level
+
+
+async def _run(session_id: str) -> None:
+    while True:
+        await asyncio.sleep(settings.ANALYSIS_INTERVAL_S)
+        session = store.get(session_id)
+        if session is None or session.status == "ended":
+            return
+        if session.status != "active":
+            continue  # the bot has not been admitted yet
+        try:
+            await tick(session)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("Analysis tick failed for session %s", session_id)
+
+
+def start_loop(session: Session) -> None:
+    task = _tasks.get(session.id)
+    if task is None or task.done():
+        _tasks[session.id] = asyncio.create_task(_run(session.id))
+
+
+def stop_loop(session_id: str) -> None:
+    task = _tasks.pop(session_id, None)
+    if task is not None and not task.done():
+        task.cancel()
+
+
+async def shutdown_all() -> None:
+    tasks = list(_tasks.values())
+    for session_id in list(_tasks):
+        stop_loop(session_id)
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+
+def end_session(session: Session, reason: str = "ended") -> dict:
+    """Stop analysis, mark the session ended, save and return the report. Safe to call twice."""
+    if session.status != "ended":
+        session.status = "ended"
+        session.ended_ts = time.time()
+        session.end_reason = reason
+        stop_loop(session.id)
+        report = build_report(session)
+        try:
+            save_report(report)
+        except Exception:
+            log.exception("Could not save report for session %s", session.id)
+        return report
+    return build_report(session)

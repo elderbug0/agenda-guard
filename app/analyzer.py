@@ -1,0 +1,126 @@
+"""OpenAI call, prompt builder and JSON result schema (on_track / moved_on / off_track)."""
+from __future__ import annotations
+
+import json
+import logging
+from typing import Any
+
+from app.config import settings
+from app.models import Session
+
+log = logging.getLogger("agenda_guard.analyzer")
+
+VALID_STATUSES = {"on_track", "moved_on", "off_track"}
+
+RESULT_SCHEMA = {
+    "name": "agenda_check",
+    "strict": True,
+    "schema": {
+        "type": "object",
+        "properties": {
+            "status": {"type": "string", "enum": sorted(VALID_STATUSES)},
+            "matched_item_id": {"type": ["string", "null"]},
+            "confidence": {"type": "number"},
+            "reason": {"type": "string"},
+        },
+        "required": ["status", "matched_item_id", "confidence", "reason"],
+        "additionalProperties": False,
+    },
+}
+
+PROMPT = """You monitor a meeting against its agenda.
+
+Agenda:
+{agenda}
+
+Current item: {current_item}
+
+You get the last ~90 seconds of transcript. Decide:
+- on_track: the discussion is relevant to the current item
+- moved_on: it clearly belongs to a different agenda item (return its id)
+- off_track: it is unrelated to every agenda item
+
+Rules:
+- Short tangents (under ~30 s), small talk and greetings are normal. Do not flag them.
+- Judge by topic, never by who is speaking.
+- If unsure, answer on_track.
+- matched_item_id: the id of the agenda item the discussion belongs to (the current item's id for on_track), or null for off_track.
+- confidence: a number from 0 to 1 for how sure you are about the status.
+- reason: one short sentence describing what the discussion is about. It is shown to the whole call, so never include a person's name.
+Return JSON only."""
+
+_client: Any = None
+
+
+def _get_client():
+    global _client
+    if _client is None:
+        from openai import AsyncOpenAI  # imported lazily so the app can start without a key
+
+        _client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    return _client
+
+
+async def close_client() -> None:
+    global _client
+    if _client is not None:
+        await _client.close()
+        _client = None
+
+
+def build_prompt(session: Session) -> str:
+    agenda = "\n".join(
+        f"- [{i.id}] {i.title}"
+        + (f": {i.description}" if i.description else "")
+        + (f" ({i.minutes} min)" if i.minutes else "")
+        for i in session.agenda
+    )
+    current = session.current_item()
+    return PROMPT.format(agenda=agenda, current_item=f"[{current.id}] {current.title}")
+
+
+def normalize(raw: dict, session: Session) -> dict:
+    """Make the model output safe for the drift engine."""
+    status = raw.get("status")
+    if status not in VALID_STATUSES:
+        status = "on_track"
+    try:
+        confidence = float(raw.get("confidence", 0.0))
+    except (TypeError, ValueError):
+        confidence = 0.0
+    confidence = max(0.0, min(1.0, confidence))
+
+    matched = raw.get("matched_item_id")
+    if matched is not None and session.item_by_id(str(matched)) is None:
+        matched = None
+    if status == "moved_on" and matched is None:
+        status = "on_track"  # moved_on needs a real agenda item
+
+    reason = " ".join(str(raw.get("reason", "")).split())[:200]
+    return {
+        "status": status,
+        "matched_item_id": str(matched) if matched is not None else None,
+        "confidence": confidence,
+        "reason": reason,
+    }
+
+
+async def analyze(session: Session, text: str | None = None, now: float | None = None) -> dict:
+    """Classify the latest transcript window against the agenda."""
+    if text is None:
+        text = session.text_of_last(settings.WINDOW_S, now)
+    resp = await _get_client().chat.completions.create(
+        model=settings.ANALYZER_MODEL,
+        temperature=0,
+        response_format={"type": "json_schema", "json_schema": RESULT_SCHEMA},
+        messages=[
+            {"role": "system", "content": build_prompt(session)},
+            {"role": "user", "content": text},
+        ],
+    )
+    try:
+        raw = json.loads(resp.choices[0].message.content)
+    except (TypeError, ValueError):
+        log.warning("Analyzer returned unparseable output; treating the window as on_track")
+        raw = {"status": "on_track", "confidence": 0.0, "reason": "unparseable analyzer output"}
+    return normalize(raw, session)
